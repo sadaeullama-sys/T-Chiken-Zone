@@ -29,22 +29,22 @@ class ChickenApp extends StatelessWidget {
 class Entry {
   String id, type, date, party, note;
   int kg, grams;
-  double rate, received, expense;
+  double rate, received, expense, oldBalance;
   Entry({required this.id, required this.type, required this.date, required this.party,
     required this.kg, required this.grams, required this.rate, required this.received,
-    required this.expense, required this.note});
+    required this.expense, required this.note, this.oldBalance = 0});
   double get weight => kg + grams / 1000.0;
   double get amount => weight * rate;
   double get balance => amount + expense - received;
   Map<String, dynamic> toJson() => {
     'id':id, 'type':type, 'date':date, 'party':party, 'kg':kg, 'grams':grams,
-    'rate':rate, 'received':received, 'expense':expense, 'note':note
+    'rate':rate, 'received':received, 'expense':expense, 'note':note, 'oldBalance':oldBalance
   };
   factory Entry.fromJson(Map<String,dynamic> j) => Entry(
     id: j['id'] ?? '', type: j['type'] ?? 'Mall', date: j['date'] ?? '',
     party: j['party'] ?? '', kg: j['kg'] ?? 0, grams: j['grams'] ?? 0,
     rate: (j['rate'] ?? 0).toDouble(), received: (j['received'] ?? 0).toDouble(),
-    expense: (j['expense'] ?? 0).toDouble(), note: j['note'] ?? '');
+    expense: (j['expense'] ?? 0).toDouble(), note: j['note'] ?? '', oldBalance: (j['oldBalance'] ?? 0).toDouble());
 }
 
 class ChickenHome extends StatefulWidget {
@@ -58,6 +58,9 @@ class _ChickenHomeState extends State<ChickenHome> {
   String appName = 'TU Chicken Zone';
   List<Entry> entries = [];
   bool loaded = false;
+  bool licenseActive = false;
+  String licenseExpiry = '';
+  static const String _licenseSalt = 'TU_CHICKEN_ZONE_OFFLINE_V1';
   final money = NumberFormat('#,##0.00');
 
   String rupees(double value) => 'Rs. ${money.format(value)}';
@@ -68,6 +71,12 @@ class _ChickenHomeState extends State<ChickenHome> {
   Future<void> loadData() async {
     final prefs = await SharedPreferences.getInstance();
     appName = prefs.getString('appName') ?? appName;
+    licenseActive = prefs.getBool('licenseActive') ?? false;
+    licenseExpiry = prefs.getString('licenseExpiry') ?? '';
+    if (licenseActive && licenseExpiry.isNotEmpty) {
+      final expiry = DateTime.tryParse(licenseExpiry);
+      if (expiry == null || DateTime.now().isAfter(expiry)) licenseActive = false;
+    }
     try {
       final raw = jsonDecode(prefs.getString('entries') ?? '[]') as List;
       entries = raw.map((e) => Entry.fromJson(Map<String,dynamic>.from(e))).toList();
@@ -79,10 +88,28 @@ class _ChickenHomeState extends State<ChickenHome> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('appName', appName);
     await prefs.setString('entries', jsonEncode(entries.map((e) => e.toJson()).toList()));
+    await prefs.setBool('licenseActive', licenseActive);
+    await prefs.setString('licenseExpiry', licenseExpiry);
   }
 
   double sum(String type, double Function(Entry) value) =>
       entries.where((e) => e.type == type).fold(0.0, (s,e) => s + value(e));
+
+  double get totalCustomerBalance {
+    final customers = entries.where((e) => e.type == 'Customer').toList();
+    final transactionBalance = customers.fold<double>(0, (s,e) => s + e.balance);
+    final oldBalances = <String,double>{};
+    for (final e in customers) {
+      oldBalances.putIfAbsent(e.party, () => e.oldBalance);
+    }
+    return transactionBalance + oldBalances.values.fold<double>(0, (s,v) => s + v);
+  }
+
+  double customerBalance(String name) {
+    final rows = entries.where((e) => e.type == 'Customer' && e.party == name).toList();
+    if (rows.isEmpty) return 0;
+    return rows.fold<double>(0, (s,e) => s + e.balance) + rows.first.oldBalance;
+  }
 
   TextFormField textField(TextEditingController controller, String label, {bool numeric = false}) {
     return TextFormField(
@@ -102,6 +129,7 @@ class _ChickenHomeState extends State<ChickenHome> {
     final received = TextEditingController(text: '${existing?.received ?? 0}');
     final expense = TextEditingController(text: '${existing?.expense ?? 0}');
     final note = TextEditingController(text: existing?.note ?? '');
+    final oldBalance = TextEditingController(text: '${existing?.oldBalance ?? 0}');
 
     final result = await showDialog<Entry>(
       context: context,
@@ -125,6 +153,8 @@ class _ChickenHomeState extends State<ChickenHome> {
                   const SizedBox(height: 9),
                   textField(rate, 'Rate Rs/Kg', numeric: true),
                   if (type == 'Customer') ...[
+                    const SizedBox(height: 9),
+                    textField(oldBalance, 'Old Balance Rs', numeric: true),
                     const SizedBox(height: 9),
                     textField(received, 'Received Rs', numeric: true),
                   ],
@@ -161,6 +191,7 @@ class _ChickenHomeState extends State<ChickenHome> {
                 party: party.text.trim(), kg: int.tryParse(kg.text) ?? 0, grams: g,
                 rate: double.tryParse(rate.text) ?? 0, received: double.tryParse(received.text) ?? 0,
                 expense: double.tryParse(expense.text) ?? 0, note: note.text.trim(),
+                oldBalance: double.tryParse(oldBalance.text) ?? 0,
               ));
             },
             child: const Text('Save'),
@@ -180,6 +211,66 @@ class _ChickenHomeState extends State<ChickenHome> {
       });
       await saveData();
     }
+  }
+
+  String _makeLicenseKey(String expiry) {
+    var hash = 17;
+    final source = '$_licenseSalt|$expiry';
+    for (final unit in source.codeUnits) { hash = (hash * 31 + unit) & 0x7fffffff; }
+    return 'TU-${expiry.replaceAll('-', '')}-${hash.toRadixString(16).toUpperCase().padLeft(8, '0')}';
+  }
+
+  Future<void> activateLicense() async {
+    final controller = TextEditingController();
+    final key = await showDialog<String>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Activate Customer License'),
+      content: TextField(controller: controller, decoration: const InputDecoration(labelText: 'License Key', hintText: 'TU-YYYYMMDD-CODE')),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, controller.text.trim().toUpperCase()), child: const Text('Activate'))],
+    ));
+    if (key == null || key.isEmpty) return;
+    final parts = key.split('-');
+    if (parts.length != 3 || parts[0] != 'TU' || parts[1].length != 8) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid license key'))); return;
+    }
+    final dateText = '${parts[1].substring(0,4)}-${parts[1].substring(4,6)}-${parts[1].substring(6,8)}';
+    final expiry = DateTime.tryParse(dateText);
+    if (expiry == null || _makeLicenseKey(dateText) != key || DateTime.now().isAfter(expiry)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('License is invalid or expired'))); return;
+    }
+    setState(() { licenseActive = true; licenseExpiry = dateText; });
+    await saveData();
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('License activated until $dateText')));
+  }
+
+  Future<void> showLicenseGenerator() async {
+    final pin = TextEditingController();
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Owner License Generator'),
+      content: TextField(controller: pin, obscureText: true, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Owner PIN (default 2580)')),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, pin.text == '2580'), child: const Text('Continue'))],
+    ));
+    if (ok != true) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Incorrect PIN'))); return; }
+    DateTime expiry = DateTime.now().add(const Duration(days: 30));
+    final generated = await showDialog<String>(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, refresh) => AlertDialog(
+      title: const Text('Generate Offline License'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('Expiry: ${DateFormat('yyyy-MM-dd').format(expiry)}'),
+        Wrap(spacing: 6, children: [
+          TextButton(onPressed: () => refresh(() => expiry = DateTime.now().add(const Duration(days: 30))), child: const Text('1 Month')),
+          TextButton(onPressed: () => refresh(() => expiry = DateTime.now().add(const Duration(days: 180))), child: const Text('6 Months')),
+          TextButton(onPressed: () => refresh(() => expiry = DateTime.now().add(const Duration(days: 365))), child: const Text('1 Year')),
+          TextButton(onPressed: () => refresh(() => expiry = DateTime(2099,12,31)), child: const Text('Lifetime')),
+        ]),
+      ]),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, _makeLicenseKey(DateFormat('yyyy-MM-dd').format(expiry))), child: const Text('Generate Key'))],
+    )));
+    if (generated != null && mounted) showDialog<void>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Customer License Key'), content: SelectableText(generated),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+    ));
   }
 
   Future<void> renameApp() async {
@@ -238,7 +329,7 @@ class _ChickenHomeState extends State<ChickenHome> {
         summaryCard('Total Mall', '${sum('Mall',(e)=>e.weight).toStringAsFixed(3)} Kg', Colors.green, Icons.scale),
         summaryCard('Total Kami', '${sum('Kami',(e)=>e.weight).toStringAsFixed(3)} Kg', red, Icons.remove_circle),
         summaryCard('Received', rupees(sum('Customer',(e)=>e.received)), Colors.blue, Icons.payments),
-        summaryCard('Balance', rupees(sum('Customer',(e)=>e.balance)), Colors.orange, Icons.account_balance_wallet),
+        summaryCard('Total Balance', rupees(totalCustomerBalance), Colors.orange, Icons.account_balance_wallet),
       ]),
     const SizedBox(height: 12),
     Wrap(spacing: 8, runSpacing: 8, children: [
@@ -247,6 +338,9 @@ class _ChickenHomeState extends State<ChickenHome> {
       actionButton('Add Customer', () => openEntryForm('Customer')),
       actionButton('All PDF', () => makePdf()),
       actionButton('Rename App', renameApp),
+      actionButton('Activate License', activateLicense),
+      actionButton('License Generator', showLicenseGenerator),
+      if (licenseActive) Text('License active until: $licenseExpiry', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
     ]),
   ]);
 
@@ -284,7 +378,7 @@ class _ChickenHomeState extends State<ChickenHome> {
         trailing: IconButton(onPressed: () => openEntryForm('Customer'), icon: const Icon(Icons.person_add))),
       ...names.map((name) {
         final rows = entries.where((e) => e.type == 'Customer' && e.party == name).toList();
-        final due = rows.fold<double>(0, (s,e) => s + e.balance);
+        final due = customerBalance(name);
         return ListTile(title: Text(name), subtitle: Text('Balance ${rupees(due)}'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => showModalBottomSheet(context: context, isScrollControlled: true,
