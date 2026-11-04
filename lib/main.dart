@@ -5,23 +5,317 @@ import 'package:intl/intl.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
-const red=Color(0xFF990909), dark=Color(0xFF650606);
-void main() async { WidgetsFlutterBinding.ensureInitialized(); runApp(const App()); }
-class App extends StatelessWidget { const App({super.key}); @override Widget build(BuildContext c)=>MaterialApp(title:'TU Chicken Zone',debugShowCheckedModeBanner:false,theme:ThemeData(useMaterial3:true,colorScheme:ColorScheme.fromSeed(seedColor:red),scaffoldBackgroundColor:const Color(0xfff5f5f5),appBarTheme:const AppBarTheme(backgroundColor:red,foregroundColor:Colors.white,centerTitle:true),inputDecorationTheme:const InputDecorationTheme(border:OutlineInputBorder())),home:const Home());}
-class R { String id,type,date,party,note; int kg,g; double rate,received,expense; R(this.id,this.type,this.date,this.party,this.kg,this.g,this.rate,this.received,this.expense,this.note); double get weight=>kg+g/1000; double get amount=>weight*rate; double get balance=>amount+expense-received; Map<String,dynamic> to()=>{'id':id,'type':type,'date':date,'party':party,'kg':kg,'g':g,'rate':rate,'received':received,'expense':expense,'note':note}; factory R.from(Map j)=>R(j['id']??'',j['type']??'Mall',j['date']??'',j['party']??'',j['kg']??0,j['g']??0,(j['rate']??0).toDouble(),(j['received']??0).toDouble(),(j['expense']??0).toDouble(),j['note']??'');}
-class Home extends StatefulWidget {const Home({super.key}); @override State<Home> createState()=>_S();}
-class _S extends State<Home>{int tab=0;String name='TU Chicken Zone';List<R> data=[];bool ready=false;final fmt=NumberFormat('#,##0.00');String rs(double x)=>'Rs. ${fmt.format(x)}';
-@override void initState(){super.initState();load();}Future<void> load()async{final p=await SharedPreferences.getInstance();name=p.getString('name')??name;try{data=(jsonDecode(p.getString('data')??'[]') as List).map((e)=>R.from(e)).toList();}catch(_){data=[];}if(mounted)setState(()=>ready=true);}
-Future<void> save()async{final p=await SharedPreferences.getInstance();await p.setString('name',name);await p.setString('data',jsonEncode(data.map((e)=>e.to()).toList()));}
-double total(String t,double Function(R) f)=>data.where((r)=>r.type==t).fold(0,(s,r)=>s+f(r));
-Future<void> form(String type,[R? old])async{final party=TextEditingController(text:old?.party??''),kg=TextEditingController(text:'${old?.kg??0}'),g=TextEditingController(text:'${old?.g??0}'),rate=TextEditingController(text:'${old?.rate??0}'),rec=TextEditingController(text:'${old?.received??0}'),exp=TextEditingController(text:'${old?.expense??0}'),note=TextEditingController(text:old?.note??'');final key=GlobalKey<FormState>();final r=await showDialog<R>(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,refresh)=>AlertDialog(title:Text('${old==null?'Add':'Edit'} $type'),content:SizedBox(width:420,child:SingleChildScrollView(child:Form(key:key,child:Column(mainAxisSize:MainAxisSize.min,children:[field(party,'Name / Supplier / Customer'),Row(children:[Expanded(child:field(kg,'KG',true)),const SizedBox(width:8),Expanded(child:field(g,'Grams (0-999)',true))]),field(rate,'Rate Rs/Kg',true),if(type=='Customer')field(rec,'Received Rs',true),if(type=='Mall')field(exp,'Vehicle Expense Rs',true),field(note,'Note'),Text('Weight ${(int.tryParse(kg.text)??0+(int.tryParse(g.text)??0)/1000).toString()} Kg')])))),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Cancel')),FilledButton(onPressed:(){if(!key.currentState!.validate())return;final grams=int.tryParse(g.text)??0;if(grams<0||grams>999){ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content:Text('Grams 0–999 only')));return;}Navigator.pop(ctx,R(old?.id??DateTime.now().microsecondsSinceEpoch.toString(),type,DateFormat('yyyy-MM-dd').format(DateTime.now()),party.text.trim(),int.tryParse(kg.text)??0,grams,double.tryParse(rate.text)??0,double.tryParse(rec.text)??0,double.tryParse(exp.text)??0,note.text));},child:const Text('Save'))]));if(r!=null){setState(()=>old==null?data.insert(0,r):data[data.indexWhere((x)=>x.id==old.id)]=r);await save();}}
-Widget field(TextEditingController c,String label,[bool num=false])=>Padding(padding:const EdgeInsets.only(bottom:9),child:TextFormField(controller:c,keyboardType:num?const TextInputType.numberWithOptions(decimal:true):TextInputType.text,validator:(v)=>v==null||v.trim().isEmpty?'Required':null,decoration:InputDecoration(labelText:label,isDense:true)));
-Future<void> pdf([String? customer])async{final list=data.where((r)=>customer==null||r.type=='Customer'&&r.party==customer).toList();final d=pw.Document();d.addPage(pw.MultiPage(build:(c)=>[pw.Text(customer==null?'TU Chicken Zone Report':'Ledger: $customer',style:pw.TextStyle(fontSize:20,fontWeight:pw.FontWeight.bold)),pw.Table.fromTextArray(headers:['Date','Type','Party','KG','Rate','Amount','Received','Balance'],data:list.map((r)=>[r.date,r.type,r.party,r.weight.toStringAsFixed(3),r.rate.toStringAsFixed(2),r.amount.toStringAsFixed(2),r.received.toStringAsFixed(2),r.balance.toStringAsFixed(2)]).toList())]));await Printing.layoutPdf(onLayout:(f)=>d.save());}
-Widget card(String label,String val,Color color,IconData icon)=>Container(padding:const EdgeInsets.all(14),decoration:BoxDecoration(color:color,borderRadius:BorderRadius.circular(15)),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Icon(icon,color:Colors.white),const SizedBox(height:6),Text(label,style:const TextStyle(color:Colors.white)),Text(val,style:const TextStyle(color:Colors.white,fontSize:17,fontWeight:FontWeight.bold))]));
-Widget dash()=>ListView(padding:const EdgeInsets.all(12),children:[Container(padding:const EdgeInsets.all(18),decoration:BoxDecoration(gradient:const LinearGradient(colors:[red,dark]),borderRadius:BorderRadius.circular(18)),child:Text(name,style:const TextStyle(color:Colors.white,fontSize:21,fontWeight:FontWeight.bold))),const SizedBox(height:12),GridView.count(shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),crossAxisCount:2,crossAxisSpacing:9,mainAxisSpacing:9,children:[card('Mall / مال','${total('Mall',(r)=>r.weight).toStringAsFixed(3)} Kg',Colors.green,Icons.scale),card('Kami / کمی','${total('Kami',(r)=>r.weight).toStringAsFixed(3)} Kg',red,Icons.remove_circle),card('Received / وصولی',rs(total('Customer',(r)=>r.received)),Colors.blue,Icons.payments),card('Balance / بقایا',rs(total('Customer',(r)=>r.balance)),Colors.orange,Icons.account_balance_wallet)]),Wrap(spacing:8,runSpacing:8,children:[action('Add Mall',()=>form('Mall')),action('Add Kami',()=>form('Kami')),action('Add Customer',()=>form('Customer')),action('PDF Report',()=>pdf()),action('Rename App',rename)])]);
-Widget action(String s,VoidCallback f)=>OutlinedButton.icon(onPressed:f,icon:const Icon(Icons.add,color:red),label:Text(s));
-Future<void> rename()async{final c=TextEditingController(text:name);final v=await showDialog<String>(context:context,builder:(ctx)=>AlertDialog(title:const Text('Change App Name'),content:TextField(controller:c),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Cancel')),FilledButton(onPressed:()=>Navigator.pop(ctx,c.text.trim()),child:const Text('Save'))]));if(v!=null&&v.isNotEmpty){setState(()=>name=v);await save();}}
-Widget listing(String? type){final list=data.where((r)=>type==null||r.type==type).toList();return ListView(padding:const EdgeInsets.all(10),children:[Row(children:[Expanded(child:Text(type??'All Records',style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold))),IconButton(onPressed:()=>form(type??'Mall'),icon:const Icon(Icons.add_circle,color:red))]),...list.map((r)=>Card(child:ListTile(onTap:()=>form(r.type,r),onLongPress:()async{if(await showDialog<bool>(context:context,builder:(c)=>AlertDialog(title:const Text('Delete record?'),actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('No')),TextButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Delete'))]))==true){setState(()=>data.removeWhere((x)=>x.id==r.id));await save();}},title:Text(r.party),subtitle:Text('${r.type} • ${r.date} • ${r.weight.toStringAsFixed(3)} Kg'),trailing:Text(rs(r.amount))))),if(list.isEmpty)const Text('No records yet.')]);}
-Widget customers(){final names=data.where((r)=>r.type=='Customer').map((r)=>r.party).toSet().toList();return ListView(children:[ListTile(title:const Text('Customers / کسٹمرز',style:TextStyle(fontSize:20,fontWeight:FontWeight.bold)),trailing:IconButton(onPressed:()=>form('Customer'),icon:const Icon(Icons.person_add))),...names.map((n){final rr=data.where((r)=>r.type=='Customer'&&r.party==n).toList();return ListTile(title:Text(n),subtitle:Text('Balance ${rs(rr.fold<double>(0,(s,r)=>s+r.balance))}'),trailing:const Icon(Icons.chevron_right),onTap:()=>showModalBottomSheet(context:context,isScrollControlled:true,builder:(c)=>SafeArea(child:Column(mainAxisSize:MainAxisSize.min,children:[Text(n,style:const TextStyle(fontSize:20)),...rr.map((r)=>ListTile(title:Text(r.date),subtitle:Text('${r.weight.toStringAsFixed(3)} Kg'),trailing:Text(rs(r.balance)))),FilledButton(onPressed:()=>pdf(n),child:const Text('Customer PDF'))]))));})]);}
-@override Widget build(BuildContext c){final pages=[dash(),listing(null),listing('Mall'),customers(),listing('Kami')];return Scaffold(appBar:AppBar(title:Text(name)),body:ready?pages[tab]:const Center(child:CircularProgressIndicator()),bottomNavigationBar:NavigationBar(selectedIndex:tab,onDestinationSelected:(i)=>setState(()=>tab=i),destinations:const[NavigationDestination(icon:Icon(Icons.home),label:'Home'),NavigationDestination(icon:Icon(Icons.list),label:'Records'),NavigationDestination(icon:Icon(Icons.scale),label:'Mall'),NavigationDestination(icon:Icon(Icons.people),label:'Customers'),NavigationDestination(icon:Icon(Icons.remove_circle),label:'Kami')]),floatingActionButton:tab==0?null:FloatingActionButton(backgroundColor:red,foregroundColor:Colors.white,onPressed:()=>form(tab==2?'Mall':tab==4?'Kami':'Customer'),child:const Icon(Icons.add)));}
+const Color red = Color(0xFF990909);
+const Color darkRed = Color(0xFF650606);
+
+void main() => runApp(const ChickenApp());
+
+class ChickenApp extends StatelessWidget {
+  const ChickenApp({super.key});
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    title: 'TU Chicken Zone',
+    debugShowCheckedModeBanner: false,
+    theme: ThemeData(
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(seedColor: red),
+      scaffoldBackgroundColor: const Color(0xFFF7F5F5),
+      appBarTheme: const AppBarTheme(backgroundColor: red, foregroundColor: Colors.white),
+    ),
+    home: const ChickenHome(),
+  );
+}
+
+class Entry {
+  String id, type, date, party, note;
+  int kg, grams;
+  double rate, received, expense;
+  Entry({required this.id, required this.type, required this.date, required this.party,
+    required this.kg, required this.grams, required this.rate, required this.received,
+    required this.expense, required this.note});
+  double get weight => kg + grams / 1000.0;
+  double get amount => weight * rate;
+  double get balance => amount + expense - received;
+  Map<String, dynamic> toJson() => {
+    'id':id, 'type':type, 'date':date, 'party':party, 'kg':kg, 'grams':grams,
+    'rate':rate, 'received':received, 'expense':expense, 'note':note
+  };
+  factory Entry.fromJson(Map<String,dynamic> j) => Entry(
+    id: j['id'] ?? '', type: j['type'] ?? 'Mall', date: j['date'] ?? '',
+    party: j['party'] ?? '', kg: j['kg'] ?? 0, grams: j['grams'] ?? 0,
+    rate: (j['rate'] ?? 0).toDouble(), received: (j['received'] ?? 0).toDouble(),
+    expense: (j['expense'] ?? 0).toDouble(), note: j['note'] ?? '');
+}
+
+class ChickenHome extends StatefulWidget {
+  const ChickenHome({super.key});
+  @override
+  State<ChickenHome> createState() => _ChickenHomeState();
+}
+
+class _ChickenHomeState extends State<ChickenHome> {
+  int tab = 0;
+  String appName = 'TU Chicken Zone';
+  List<Entry> entries = [];
+  bool loaded = false;
+  final money = NumberFormat('#,##0.00');
+
+  String rupees(double value) => 'Rs. ${money.format(value)}';
+
+  @override
+  void initState() { super.initState(); loadData(); }
+
+  Future<void> loadData() async {
+    final prefs = await SharedPreferences.getInstance();
+    appName = prefs.getString('appName') ?? appName;
+    try {
+      final raw = jsonDecode(prefs.getString('entries') ?? '[]') as List;
+      entries = raw.map((e) => Entry.fromJson(Map<String,dynamic>.from(e))).toList();
+    } catch (_) { entries = []; }
+    if (mounted) setState(() => loaded = true);
+  }
+
+  Future<void> saveData() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('appName', appName);
+    await prefs.setString('entries', jsonEncode(entries.map((e) => e.toJson()).toList()));
+  }
+
+  double sum(String type, double Function(Entry) value) =>
+      entries.where((e) => e.type == type).fold(0.0, (s,e) => s + value(e));
+
+  TextFormField textField(TextEditingController controller, String label, {bool numeric = false}) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: numeric ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text,
+      validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+      decoration: InputDecoration(labelText: label, border: const OutlineInputBorder(), isDense: true),
+    );
+  }
+
+  Future<void> openEntryForm(String type, {Entry? existing}) async {
+    final formKey = GlobalKey<FormState>();
+    final party = TextEditingController(text: existing?.party ?? '');
+    final kg = TextEditingController(text: '${existing?.kg ?? 0}');
+    final grams = TextEditingController(text: '${existing?.grams ?? 0}');
+    final rate = TextEditingController(text: '${existing?.rate ?? 0}');
+    final received = TextEditingController(text: '${existing?.received ?? 0}');
+    final expense = TextEditingController(text: '${existing?.expense ?? 0}');
+    final note = TextEditingController(text: existing?.note ?? '');
+
+    final result = await showDialog<Entry>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('${existing == null ? 'Add' : 'Edit'} $type'),
+        content: SizedBox(
+          width: 420,
+          child: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  textField(party, type == 'Customer' ? 'Customer Name' : 'Supplier / Party Name'),
+                  const SizedBox(height: 9),
+                  Row(children: [
+                    Expanded(child: textField(kg, 'Weight KG', numeric: true)),
+                    const SizedBox(width: 8),
+                    Expanded(child: textField(grams, 'Grams (0-999)', numeric: true)),
+                  ]),
+                  const SizedBox(height: 9),
+                  textField(rate, 'Rate Rs/Kg', numeric: true),
+                  if (type == 'Customer') ...[
+                    const SizedBox(height: 9),
+                    textField(received, 'Received Rs', numeric: true),
+                  ],
+                  if (type == 'Mall') ...[
+                    const SizedBox(height: 9),
+                    textField(expense, 'Vehicle Expense Rs', numeric: true),
+                  ],
+                  const SizedBox(height: 9),
+                  textField(note, 'Note'),
+                  const SizedBox(height: 10),
+                  Builder(builder: (context) {
+                    final w = (int.tryParse(kg.text) ?? 0) + (int.tryParse(grams.text) ?? 0) / 1000.0;
+                    final a = w * (double.tryParse(rate.text) ?? 0);
+                    return Text('Total: ${w.toStringAsFixed(3)} Kg  |  ${rupees(a)}');
+                  }),
+                ],
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              if (!formKey.currentState!.validate()) return;
+              final g = int.tryParse(grams.text) ?? 0;
+              if (g < 0 || g > 999) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Grams must be between 0 and 999')));
+                return;
+              }
+              Navigator.pop(dialogContext, Entry(
+                id: existing?.id ?? DateTime.now().microsecondsSinceEpoch.toString(),
+                type: type, date: DateFormat('yyyy-MM-dd').format(DateTime.now()),
+                party: party.text.trim(), kg: int.tryParse(kg.text) ?? 0, grams: g,
+                rate: double.tryParse(rate.text) ?? 0, received: double.tryParse(received.text) ?? 0,
+                expense: double.tryParse(expense.text) ?? 0, note: note.text.trim(),
+              ));
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null) {
+      setState(() {
+        if (existing == null) {
+          entries.insert(0, result);
+        } else {
+          final index = entries.indexWhere((e) => e.id == existing.id);
+          if (index >= 0) entries[index] = result;
+        }
+      });
+      await saveData();
+    }
+  }
+
+  Future<void> renameApp() async {
+    final controller = TextEditingController(text: appName);
+    final value = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Change App Name'),
+        content: TextField(controller: controller, decoration: const InputDecoration(labelText: 'App name')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (value != null && value.isNotEmpty) {
+      setState(() => appName = value);
+      await saveData();
+    }
+  }
+
+  Future<void> makePdf({String? customer}) async {
+    final list = entries.where((e) => customer == null || (e.type == 'Customer' && e.party == customer)).toList();
+    final doc = pw.Document();
+    doc.addPage(pw.MultiPage(build: (_) => [
+      pw.Text(customer == null ? '$appName Report' : 'Customer Ledger: $customer',
+        style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
+      pw.SizedBox(height: 12),
+      pw.Table.fromTextArray(
+        headers: ['Date','Type','Party','Weight Kg','Rate','Amount','Received','Balance'],
+        data: list.map((e) => [e.date,e.type,e.party,e.weight.toStringAsFixed(3),
+          e.rate.toStringAsFixed(2),e.amount.toStringAsFixed(2),e.received.toStringAsFixed(2),
+          e.balance.toStringAsFixed(2)]).toList(),
+      ),
+    ]));
+    await Printing.layoutPdf(onLayout: (_) => doc.save());
+  }
+
+  Widget summaryCard(String label, String value, Color color, IconData icon) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(14)),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Icon(icon, color: Colors.white), const SizedBox(height: 7),
+      Text(label, style: const TextStyle(color: Colors.white)),
+      Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17)),
+    ]),
+  );
+
+  Widget homePage() => ListView(padding: const EdgeInsets.all(12), children: [
+    Container(padding: const EdgeInsets.all(18), decoration: BoxDecoration(
+      gradient: const LinearGradient(colors: [red,darkRed]), borderRadius: BorderRadius.circular(18)),
+      child: Text(appName, style: const TextStyle(color: Colors.white, fontSize: 23, fontWeight: FontWeight.bold))),
+    const SizedBox(height: 12),
+    GridView.count(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), crossAxisCount: 2,
+      crossAxisSpacing: 9, mainAxisSpacing: 9, children: [
+        summaryCard('Total Mall', '${sum('Mall',(e)=>e.weight).toStringAsFixed(3)} Kg', Colors.green, Icons.scale),
+        summaryCard('Total Kami', '${sum('Kami',(e)=>e.weight).toStringAsFixed(3)} Kg', red, Icons.remove_circle),
+        summaryCard('Received', rupees(sum('Customer',(e)=>e.received)), Colors.blue, Icons.payments),
+        summaryCard('Balance', rupees(sum('Customer',(e)=>e.balance)), Colors.orange, Icons.account_balance_wallet),
+      ]),
+    const SizedBox(height: 12),
+    Wrap(spacing: 8, runSpacing: 8, children: [
+      actionButton('Add Mall', () => openEntryForm('Mall')),
+      actionButton('Add Kami', () => openEntryForm('Kami')),
+      actionButton('Add Customer', () => openEntryForm('Customer')),
+      actionButton('All PDF', () => makePdf()),
+      actionButton('Rename App', renameApp),
+    ]),
+  ]);
+
+  Widget actionButton(String label, VoidCallback onTap) => OutlinedButton.icon(
+    onPressed: onTap, icon: const Icon(Icons.add, color: red), label: Text(label));
+
+  Widget recordsPage(String? type) {
+    final list = entries.where((e) => type == null || e.type == type).toList();
+    return ListView(padding: const EdgeInsets.all(10), children: [
+      ListTile(title: Text(type ?? 'All Records', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        trailing: IconButton(onPressed: () => openEntryForm(type ?? 'Mall'), icon: const Icon(Icons.add_circle, color: red))),
+      if (list.isEmpty) const Padding(padding: EdgeInsets.all(20), child: Text('No records yet')),
+      ...list.map((e) => Card(child: ListTile(
+        title: Text(e.party), subtitle: Text('${e.type} • ${e.date} • ${e.weight.toStringAsFixed(3)} Kg'),
+        trailing: Text(rupees(e.amount)),
+        onTap: () => openEntryForm(e.type, existing: e),
+        onLongPress: () async {
+          final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+            title: const Text('Delete record?'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx,false), child: const Text('Cancel')),
+              TextButton(onPressed: () => Navigator.pop(ctx,true), child: const Text('Delete')),
+            ],
+          ));
+          if (ok == true) { setState(() => entries.removeWhere((x) => x.id == e.id)); await saveData(); }
+        },
+      ))),
+    ]);
+  }
+
+  Widget customersPage() {
+    final names = entries.where((e) => e.type == 'Customer').map((e) => e.party).toSet().toList();
+    return ListView(children: [
+      ListTile(title: const Text('Customers / کسٹمرز', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        trailing: IconButton(onPressed: () => openEntryForm('Customer'), icon: const Icon(Icons.person_add))),
+      ...names.map((name) {
+        final rows = entries.where((e) => e.type == 'Customer' && e.party == name).toList();
+        final due = rows.fold<double>(0, (s,e) => s + e.balance);
+        return ListTile(title: Text(name), subtitle: Text('Balance ${rupees(due)}'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => showModalBottomSheet(context: context, isScrollControlled: true,
+            builder: (ctx) => SafeArea(child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Padding(padding: const EdgeInsets.all(12), child: Text(name, style: const TextStyle(fontSize: 20))),
+              ...rows.map((e) => ListTile(title: Text(e.date), subtitle: Text('${e.weight.toStringAsFixed(3)} Kg'), trailing: Text(rupees(e.balance)))),
+              FilledButton(onPressed: () => makePdf(customer: name), child: const Text('Customer PDF')),
+            ])))),
+        );
+      }),
+    ]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = [homePage(), recordsPage(null), recordsPage('Mall'), customersPage(), recordsPage('Kami')];
+    return Scaffold(
+      appBar: AppBar(title: Text(appName)),
+      body: loaded ? pages[tab] : const Center(child: CircularProgressIndicator()),
+      bottomNavigationBar: NavigationBar(selectedIndex: tab, onDestinationSelected: (i) => setState(() => tab = i),
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.home), label: 'Home'),
+          NavigationDestination(icon: Icon(Icons.list), label: 'Records'),
+          NavigationDestination(icon: Icon(Icons.scale), label: 'Mall'),
+          NavigationDestination(icon: Icon(Icons.people), label: 'Customers'),
+          NavigationDestination(icon: Icon(Icons.remove_circle), label: 'Kami'),
+        ]),
+      floatingActionButton: tab == 0 ? null : FloatingActionButton(
+        backgroundColor: red, foregroundColor: Colors.white,
+        onPressed: () => openEntryForm(tab == 2 ? 'Mall' : tab == 4 ? 'Kami' : 'Customer'),
+        child: const Icon(Icons.add)),
+    );
+  }
 }
