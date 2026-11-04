@@ -60,6 +60,7 @@ class _ChickenHomeState extends State<ChickenHome> {
   bool loaded = false;
   bool licenseActive = false;
   String licenseExpiry = '';
+  String deviceId = '';
   static const String _licenseSalt = 'TU_CHICKEN_ZONE_OFFLINE_V1';
   final money = NumberFormat('#,##0.00');
 
@@ -72,11 +73,13 @@ class _ChickenHomeState extends State<ChickenHome> {
     final prefs = await SharedPreferences.getInstance();
     appName = prefs.getString('appName') ?? appName;
     licenseActive = prefs.getBool('licenseActive') ?? false;
-    licenseExpiry = prefs.getString('licenseExpiry') ?? '';
-    if (licenseActive && licenseExpiry.isNotEmpty) {
-      final expiry = DateTime.tryParse(licenseExpiry);
-      if (expiry == null || DateTime.now().isAfter(expiry)) licenseActive = false;
+    licenseExpiry = '';
+    deviceId = prefs.getString('deviceId') ?? '';
+    if (deviceId.isEmpty) {
+      deviceId = 'CHZ-${DateTime.now().millisecondsSinceEpoch.toRadixString(16).toUpperCase()}';
+      await prefs.setString('deviceId', deviceId);
     }
+    licenseActive = prefs.getBool('licenseActive') ?? false;
     try {
       final raw = jsonDecode(prefs.getString('entries') ?? '[]') as List;
       entries = raw.map((e) => Entry.fromJson(Map<String,dynamic>.from(e))).toList();
@@ -89,7 +92,7 @@ class _ChickenHomeState extends State<ChickenHome> {
     await prefs.setString('appName', appName);
     await prefs.setString('entries', jsonEncode(entries.map((e) => e.toJson()).toList()));
     await prefs.setBool('licenseActive', licenseActive);
-    await prefs.setString('licenseExpiry', licenseExpiry);
+    await prefs.setString('licenseExpiry', '');
   }
 
   double sum(String type, double Function(Entry) value) =>
@@ -213,65 +216,89 @@ class _ChickenHomeState extends State<ChickenHome> {
     }
   }
 
-  String _makeLicenseKey(String expiry) {
+  String _makeLicenseKey(String id) {
     var hash = 17;
-    final source = '$_licenseSalt|$expiry';
+    final source = '$_licenseSalt|${id.trim().toUpperCase()}';
     for (final unit in source.codeUnits) { hash = (hash * 31 + unit) & 0x7fffffff; }
-    return 'TU-${expiry.replaceAll('-', '')}-${hash.toRadixString(16).toUpperCase().padLeft(8, '0')}';
+    return 'TU-${id.trim().toUpperCase()}-${hash.toRadixString(16).toUpperCase().padLeft(8, '0')}';
   }
 
   Future<void> activateLicense() async {
     final controller = TextEditingController();
     final key = await showDialog<String>(context: context, builder: (ctx) => AlertDialog(
-      title: const Text('Activate Customer License'),
-      content: TextField(controller: controller, decoration: const InputDecoration(labelText: 'License Key', hintText: 'TU-YYYYMMDD-CODE')),
+      title: const Text('License Activation'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        SelectableText('Device ID: $deviceId'),
+        const SizedBox(height: 12),
+        TextField(controller: controller, decoration: const InputDecoration(labelText: 'Enter License Key')),
+      ]),
       actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
         FilledButton(onPressed: () => Navigator.pop(ctx, controller.text.trim().toUpperCase()), child: const Text('Activate'))],
     ));
     if (key == null || key.isEmpty) return;
-    final parts = key.split('-');
-    if (parts.length != 3 || parts[0] != 'TU' || parts[1].length != 8) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid license key'))); return;
+    if (_makeLicenseKey(deviceId) != key) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid license key for this device')));
+      return;
     }
-    final dateText = '${parts[1].substring(0,4)}-${parts[1].substring(4,6)}-${parts[1].substring(6,8)}';
-    final expiry = DateTime.tryParse(dateText);
-    if (expiry == null || _makeLicenseKey(dateText) != key || DateTime.now().isAfter(expiry)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('License is invalid or expired'))); return;
-    }
-    setState(() { licenseActive = true; licenseExpiry = dateText; });
+    setState(() => licenseActive = true);
     await saveData();
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('License activated until $dateText')));
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('License activated successfully')));
   }
 
   Future<void> showLicenseGenerator() async {
     final pin = TextEditingController();
     final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
-      title: const Text('Owner License Generator'),
-      content: TextField(controller: pin, obscureText: true, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Admin License Password')),
+      title: const Text('Admin License Generator'),
+      content: TextField(controller: pin, obscureText: true, keyboardType: TextInputType.number,
+        decoration: const InputDecoration(labelText: 'Admin Password')),
       actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
         FilledButton(onPressed: () => Navigator.pop(ctx, pin.text == '03135353153'), child: const Text('Continue'))],
     ));
-    if (ok != true) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Incorrect PIN'))); return; }
-    DateTime expiry = DateTime.now().add(const Duration(days: 30));
-    final generated = await showDialog<String>(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, refresh) => AlertDialog(
-      title: const Text('Generate Offline License'),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        Text('Expiry: ${DateFormat('yyyy-MM-dd').format(expiry)}'),
-        Wrap(spacing: 6, children: [
-          TextButton(onPressed: () => refresh(() => expiry = DateTime.now().add(const Duration(days: 30))), child: const Text('1 Month')),
-          TextButton(onPressed: () => refresh(() => expiry = DateTime.now().add(const Duration(days: 180))), child: const Text('6 Months')),
-          TextButton(onPressed: () => refresh(() => expiry = DateTime.now().add(const Duration(days: 365))), child: const Text('1 Year')),
-          TextButton(onPressed: () => refresh(() => expiry = DateTime(2099,12,31)), child: const Text('Lifetime')),
-        ]),
-      ]),
+    if (ok != true) return;
+    final idController = TextEditingController();
+    final id = await showDialog<String>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Generate License Key'),
+      content: TextField(controller: idController, decoration: const InputDecoration(labelText: 'Customer Device ID')),
       actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(ctx, _makeLicenseKey(DateFormat('yyyy-MM-dd').format(expiry))), child: const Text('Generate Key'))],
-    )));
-    if (generated != null && mounted) showDialog<void>(context: context, builder: (ctx) => AlertDialog(
-      title: const Text('Customer License Key'), content: SelectableText(generated),
+        FilledButton(onPressed: () => Navigator.pop(ctx, idController.text.trim()), child: const Text('Generate'))],
+    ));
+    if (id == null || id.isEmpty) return;
+    final generated = _makeLicenseKey(id);
+    if (mounted) showDialog<void>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('License Key'), content: SelectableText(generated),
       actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
     ));
   }
+
+  Widget activationScreen() => Scaffold(
+    backgroundColor: const Color(0xFFF7F5F5),
+    body: SafeArea(child: Center(child: SingleChildScrollView(padding: const EdgeInsets.all(22),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        GestureDetector(onLongPress: showLicenseGenerator, child: Container(
+          padding: const EdgeInsets.all(20), decoration: BoxDecoration(
+            gradient: const LinearGradient(colors: [red, darkRed]), borderRadius: BorderRadius.circular(20)),
+          child: Column(children: const [
+            Icon(Icons.local_florist, color: Colors.white, size: 54),
+            SizedBox(height: 10),
+            Text('TU Chicken Zone', style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+          ]))),
+        const SizedBox(height: 24),
+        const Text('LICENSE ACTIVATION', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 14),
+        Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(children: [
+          const Align(alignment: Alignment.centerLeft, child: Text('Device ID')),
+          const SizedBox(height: 6),
+          SelectableText(deviceId),
+          const SizedBox(height: 14),
+          SizedBox(width: double.infinity, child: FilledButton.icon(
+            onPressed: activateLicense, icon: const Icon(Icons.key), label: const Text('Enter License Key'))),
+          const SizedBox(height: 12),
+          const Text('Contact for license: 03161847676'),
+        ]))),
+        const SizedBox(height: 12),
+        const Text('Press and hold the logo to open Admin License Generator', textAlign: TextAlign.center),
+      ])))),
+  );
 
   Future<void> renameApp() async {
     final controller = TextEditingController(text: appName);
@@ -396,6 +423,8 @@ class _ChickenHomeState extends State<ChickenHome> {
 
   @override
   Widget build(BuildContext context) {
+    if (!loaded) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (!licenseActive) return activationScreen();
     final pages = [homePage(), recordsPage(null), recordsPage('Mall'), customersPage(), recordsPage('Kami')];
     return Scaffold(
       appBar: AppBar(title: Text(appName)),
