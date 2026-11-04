@@ -247,9 +247,9 @@ class _ChickenHomeState extends State<ChickenHome> {
     final pin = TextEditingController();
     final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
       title: const Text('Owner License Generator'),
-      content: TextField(controller: pin, obscureText: true, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Owner PIN (default 2580)')),
+      content: TextField(controller: pin, obscureText: true, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Admin License Password')),
       actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(ctx, pin.text == '2580'), child: const Text('Continue'))],
+        FilledButton(onPressed: () => Navigator.pop(ctx, pin.text == '03135353153'), child: const Text('Continue'))],
     ));
     if (ok != true) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Incorrect PIN'))); return; }
     DateTime expiry = DateTime.now().add(const Duration(days: 30));
@@ -322,7 +322,7 @@ class _ChickenHomeState extends State<ChickenHome> {
   Widget homePage() => ListView(padding: const EdgeInsets.all(12), children: [
     Container(padding: const EdgeInsets.all(18), decoration: BoxDecoration(
       gradient: const LinearGradient(colors: [red,darkRed]), borderRadius: BorderRadius.circular(18)),
-      child: Text(appName, style: const TextStyle(color: Colors.white, fontSize: 23, fontWeight: FontWeight.bold))),
+      child: GestureDetector(onLongPress: showLicenseGenerator, child: Text(appName, style: const TextStyle(color: Colors.white, fontSize: 23, fontWeight: FontWeight.bold)))),
     const SizedBox(height: 12),
     GridView.count(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), crossAxisCount: 2,
       crossAxisSpacing: 9, mainAxisSpacing: 9, children: [
@@ -330,6 +330,7 @@ class _ChickenHomeState extends State<ChickenHome> {
         summaryCard('Total Kami', '${sum('Kami',(e)=>e.weight).toStringAsFixed(3)} Kg', red, Icons.remove_circle),
         summaryCard('Received', rupees(sum('Customer',(e)=>e.received)), Colors.blue, Icons.payments),
         summaryCard('Total Balance', rupees(totalCustomerBalance), Colors.orange, Icons.account_balance_wallet),
+        summaryCard('Today Mall Purchase', rupees(entries.where((e) => e.type == 'Mall' && e.date == DateFormat('yyyy-MM-dd').format(DateTime.now())).fold<double>(0, (s,e) => s + e.amount + e.expense)), Colors.deepPurple, Icons.shopping_cart),
       ]),
     const SizedBox(height: 12),
     Wrap(spacing: 8, runSpacing: 8, children: [
@@ -340,6 +341,7 @@ class _ChickenHomeState extends State<ChickenHome> {
       actionButton('Rename App', renameApp),
       actionButton('Activate License', activateLicense),
       actionButton('License Generator', showLicenseGenerator),
+      const ListTile(leading: Icon(Icons.phone, color: red), title: Text('Contact for customer schemes / license'), subtitle: Text('03161847676')),
       if (licenseActive) Text('License active until: $licenseExpiry', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
     ]),
   ]);
